@@ -4,7 +4,7 @@ import { AlertCircle, PlusCircle, PenTool, RefreshCw, FolderPlus, Copy, Check, I
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [password, setPassword] = useState('');
-  const [model, setModel] = useState('gemini-1.5-flash');
+  const [model, setModel] = useState('gemini-2.5-flash');
   const [prompt, setPrompt] = useState('');
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   
@@ -209,9 +209,9 @@ export default function App() {
                 onChange={e => setModel(e.target.value)} 
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
+                <option className="bg-slate-800 text-white" value="gemini-2.5-flash">Gemini 2.5 Flash (Khuyên dùng)</option>
                 <option className="bg-slate-800 text-white" value="gemini-1.5-flash">Gemini 1.5 Flash (Nhanh)</option>
                 <option className="bg-slate-800 text-white" value="gemini-1.5-pro">Gemini 1.5 Pro (Nâng cao)</option>
-                <option className="bg-slate-800 text-white" value="gemini-2.0-flash">Gemini 2.0 Flash</option>
               </select>
             </div>
 
