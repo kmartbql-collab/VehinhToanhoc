@@ -1,0 +1,8 @@
+{
+  "name": "Trợ Lý Giáo Viên Toán AI",
+  "description": "Tạo hình vẽ Toán qua mô tả bằng GeoGebra bằng cách sử dụng AI và Google Gemini",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
