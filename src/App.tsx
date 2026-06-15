@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AlertCircle, PlusCircle, PenTool, RefreshCw, FolderPlus, Copy, Check } from 'lucide-react';
+import { AlertCircle, PlusCircle, PenTool, RefreshCw, FolderPlus, Copy, Check, Info } from 'lucide-react';
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
@@ -10,6 +10,7 @@ export default function App() {
   
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -20,11 +21,14 @@ export default function App() {
   }, []);
 
   const saveConfig = () => {
-    if (!apiKey.trim()) {
+    // Clean key of leading/trailing quotes or spaces
+    const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
+    if (!cleanKey) {
       alert('Vui lòng nhập API Key hợp lệ.');
       return;
     }
-    localStorage.setItem('geogebra_assistant_api_key', apiKey.trim());
+    setApiKey(cleanKey);
+    localStorage.setItem('geogebra_assistant_api_key', cleanKey);
     if (password) {
       localStorage.setItem('geogebra_assistant_pwd', password);
     }
@@ -35,6 +39,7 @@ export default function App() {
     setPrompt('');
     setAdditionalPrompt('');
     setResult('');
+    setErrorMessage('');
     setCopied(false);
   };
 
@@ -47,7 +52,8 @@ export default function App() {
   };
 
   const generate = async () => {
-    if (!apiKey) {
+    const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
+    if (!cleanKey) {
       alert('Vui lòng nhập và lưu API Key trước khi sử dụng.');
       return;
     }
@@ -58,6 +64,7 @@ export default function App() {
 
     setLoading(true);
     setResult('');
+    setErrorMessage('');
     setCopied(false);
 
     try {
@@ -65,7 +72,8 @@ export default function App() {
         ? `${prompt}\n\nYêu cầu bổ sung:\n${additionalPrompt}` 
         : prompt;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      // Ensure we query the models using v1beta or secure endpoints
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -88,12 +96,21 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        let descriptiveError = `Lỗi API (${response.status} ${response.statusText})`;
+        try {
+          const errData = await response.json();
+          if (errData?.error?.message) {
+            descriptiveError = `${errData.error.message} (Status: ${errData.error.status || response.status})`;
+          }
+        } catch (e) {
+          // ignore parsing fail, fallback to status code
+        }
+        throw new Error(descriptiveError);
       }
 
       const data = await response.json();
       
-      if (data.candidates && data.candidates[0].content.parts[0].text) {
+      if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
         let text = data.candidates[0].content.parts[0].text.trim();
         // Fallback cleanup if the model still returns markdown code block markers
         if (text.startsWith('```')) {
@@ -106,10 +123,10 @@ export default function App() {
         }
         setResult(text);
       } else {
-        setResult('Không nhận được kết quả hợp lệ từ AI.');
+        setResult('Không nhận được kết quả hợp lệ từ AI. Hãy thử lại hoặc đổi mô hình.');
       }
     } catch (error: any) {
-      alert(`Đã xảy ra lỗi: ${error.message}`);
+      setErrorMessage(error.message);
       setResult('');
     } finally {
       setLoading(false);
@@ -247,7 +264,26 @@ export default function App() {
           </div>
           
           <div className="p-6 sm:p-10 flex-1 flex flex-col items-center justify-center">
-            {!result && !loading ? (
+            {errorMessage ? (
+              <div className="text-left w-full max-w-md bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-red-200 text-sm space-y-3 animate-in fade-in duration-300">
+                <div className="flex items-start gap-2 text-red-400">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <span className="font-bold text-base">Gọi API thất bại</span>
+                </div>
+                <div className="bg-black/30 p-3 rounded-lg font-mono text-xs overflow-x-auto whitespace-pre-wrap select-text border border-red-500/10">
+                  {errorMessage}
+                </div>
+                <div className="pt-2 text-xs text-white/70 space-y-1.5 border-t border-white/10">
+                  <p className="font-semibold text-white/90">Hướng dẫn khắc phục:</p>
+                  <ul className="list-disc list-inside space-y-1 pl-1">
+                    <li>Kiểm tra xem API Key đã được điền chính xác chưa và bấm <strong>Lưu cấu hình</strong>.</li>
+                    <li>Đảm bảo dịch vụ <strong className="text-indigo-300">Generative Language API</strong> đã được kích hoạt trong Google Cloud.</li>
+                    <li>Thử chọn mô hình khác như <strong className="text-indigo-300">Gemini 1.5 Flash</strong> ở mục lựa chọn mô hình.</li>
+                    <li>Nếu lỗi liên quan đến quốc gia (User location is not supported), bạn có thể cần kiểm tra vị trí địa lý của mạng internet hoặc sử dụng proxy/VPN.</li>
+                  </ul>
+                </div>
+              </div>
+            ) : !result && !loading ? (
               <div className="text-center max-w-md w-full py-4">
                 <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/10">
                   <FolderPlus className="w-10 h-10 sm:w-12 sm:h-12 text-white/30" strokeWidth={1.5} />
