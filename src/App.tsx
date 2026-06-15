@@ -1,13 +1,148 @@
-import { useState, useEffect } from 'react';
-import { AlertCircle, PlusCircle, PenTool, RefreshCw, FolderPlus, Copy, Check, Info } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AlertCircle, PlusCircle, PenTool, RefreshCw, FolderPlus, Copy, Check, Info, Upload, Eye, EyeOff } from 'lucide-react';
+
+declare global {
+  interface Window {
+    GGBApplet?: any;
+    ggbApplet?: any;
+  }
+}
+
+interface GeoGebraViewerProps {
+  script: string;
+}
+
+function GeoGebraViewer({ script }: GeoGebraViewerProps) {
+  const containerId = "ggb-applet-inner-container";
+  const [loaded, setLoaded] = useState(false);
+  const [apiReady, setApiReady] = useState<any>(null);
+  const initializedRef = useRef<boolean>(false);
+
+  // Load GeoGebra deployggb.js loader script
+  useEffect(() => {
+    if (window.GGBApplet) {
+      setLoaded(true);
+      return;
+    }
+    const scriptTag = document.createElement('script');
+    scriptTag.src = 'https://www.geogebra.org/apps/deployggb.js';
+    scriptTag.async = true;
+    scriptTag.onload = () => {
+      setLoaded(true);
+    };
+    scriptTag.onerror = () => {
+      console.error("Failed to load GeoGebra deployggb.js script");
+    };
+    document.body.appendChild(scriptTag);
+  }, []);
+
+  // Initialize GGBApplet strictly ONCE
+  useEffect(() => {
+    if (!loaded || initializedRef.current) return;
+    initializedRef.current = true;
+
+    // We register a global callback that GeoGebra can invoke on load
+    const globalCallbackName = "onGeoGebraAppletReady";
+    (window as any)[globalCallbackName] = (api: any) => {
+      console.log("GeoGebra API loaded and ready:", api);
+      setApiReady(api);
+    };
+
+    const params = {
+      appName: 'classic',
+      width: '100%',
+      height: '100%',
+      showToolBar: false,
+      showMenuBar: false,
+      showAlgebraInput: true,
+      useBrowserForJS: true, // MUST BE true to trigger script loading and appletOnLoad callback
+      enableShiftDragZoom: true,
+      errorDialogsActive: false,
+      isHTML5: true,
+      language: 'vi', // Strict Vietnamese language setting for Vietnamese GGB scripts
+      allowRescale: true, // Make applet responsive inside containment flexboxes
+      appletOnLoad: globalCallbackName,
+    };
+
+    try {
+      const applet = new window.GGBApplet(params, true);
+      applet.inject(containerId);
+    } catch (err) {
+      console.error("Error creating GGBApplet:", err);
+    }
+
+    return () => {
+      // Cleanup global callback on unmount
+      delete (window as any)[globalCallbackName];
+    };
+  }, [loaded]);
+
+  // Execute Commands on Script/API state change
+  useEffect(() => {
+    if (!apiReady || !script) return;
+
+    try {
+      if (apiReady.newConstruction) {
+        apiReady.newConstruction();
+      } else if (apiReady.reset) {
+        apiReady.reset();
+      }
+
+      // Add default axes and grid visualization
+      apiReady.evalCommand('ShowAxes(true)');
+      apiReady.evalCommand('ShowGrid(true)');
+
+      const lines = script.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('//') && !trimmed.startsWith('#')) {
+          try {
+            apiReady.evalCommand(trimmed);
+          } catch (evalErr) {
+            console.warn(`Failed to eval ggb command: "${trimmed}"`, evalErr);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('GeoGebra script execution error:', err);
+    }
+  }, [apiReady, script]);
+
+  return (
+    <div className="w-full bg-white rounded-xl overflow-hidden border border-white/20 p-2 shadow-inner">
+      <div className="relative w-full h-[400px] min-h-[400px] bg-white rounded-lg flex flex-col justify-center items-center overflow-hidden">
+        {/* Target container for GGBApplet inject - Always fully visible to prevent measuring/rendering locks */}
+        <div 
+          id={containerId} 
+          className="absolute inset-0 w-full h-full bg-white"
+        />
+        
+        {!apiReady && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 z-10 bg-slate-900 text-indigo-250 text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-400 border-t-transparent"></div>
+            <p className="text-sm font-semibold animate-pulse">Đang chuẩn bị bảng vẽ GeoGebra...</p>
+            <p className="text-xs text-indigo-300/60 max-w-xs leading-relaxed">
+              Hệ thống đang tải thư viện toán học từ máy chủ GeoGebra. Quá trình này có thể mất vài giây.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [password, setPassword] = useState('');
+  const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState('gemini-2.5-flash');
   const [prompt, setPrompt] = useState('');
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   
+  // Image Upload State
+  const [image, setImage] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>('');
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -19,6 +154,19 @@ export default function App() {
     const savedPassword = localStorage.getItem('geogebra_assistant_pwd');
     if (savedPassword) setPassword(savedPassword);
   }, []);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const resultStr = reader.result as string;
+      setImage(resultStr);
+      setImageMime(file.type);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const saveConfig = () => {
     // Clean key of leading/trailing quotes or spaces
@@ -40,6 +188,8 @@ export default function App() {
     setAdditionalPrompt('');
     setResult('');
     setErrorMessage('');
+    setImage(null);
+    setImageMime('');
     setCopied(false);
   };
 
@@ -57,8 +207,8 @@ export default function App() {
       alert('Vui lòng nhập và lưu API Key trước khi sử dụng.');
       return;
     }
-    if (!prompt.trim()) {
-       alert('Vui lòng nhập nội dung yêu cầu.');
+    if (!prompt.trim() && !image) {
+       alert('Vui lòng nhập nội dung yêu cầu hoặc tải ảnh đề thi lên.');
        return;
     }
 
@@ -72,6 +222,22 @@ export default function App() {
         ? `${prompt}\n\nYêu cầu bổ sung:\n${additionalPrompt}` 
         : prompt;
 
+      const parts: any[] = [];
+
+      if (image) {
+        const base64Data = image.split(',')[1];
+        parts.push({
+          inlineData: {
+            mimeType: imageMime || 'image/jpeg',
+            data: base64Data
+          }
+        });
+      }
+
+      parts.push({ 
+        text: `Đề bài: ${fullPrompt || "Hãy vẽ hình theo mẫu trong file ảnh hoặc giải quyết đề thi trong ảnh."}` 
+      });
+
       // Ensure we query the models using v1beta or secure endpoints
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
         method: 'POST',
@@ -81,15 +247,13 @@ export default function App() {
         body: JSON.stringify({
           systemInstruction: {
             parts: [
-              { text: "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) chính xác. Chỉ trả về mã lệnh dưới dạng plain text, không giải thích dài dòng. Không bao gồm các block markdown (như ```geogebra)." }
+              { text: "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình hoặc đề bài toán học của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) chính xác để minh họa cấu trúc toán học đó. Bạn hãy sử dụng các lệnh GeoGebra chuẩn bằng tiếng Anh (như Point, Line, Circle, Segment, Polygon, Intersect, Midpoint, Angle) hoặc bằng tiếng Việt (như Điểm, ĐườngThẳng, ĐườngTròn, ĐoạnThẳng, ĐaGiác, GiaoĐiểm, TrungĐiểm, Góc) để tương thích hoàn hảo với tệp tài nguyên Việt hóa. Chỉ trả về mã lệnh dưới dạng plain text, đặt mỗi câu lệnh trên một dòng mới độc lập, không có giải thích dài dòng và không nằm trong các block markdown (như ```geogebra)." }
             ]
           },
           contents: [
             {
               role: "user",
-              parts: [
-                { text: fullPrompt }
-              ]
+              parts: parts
             }
           ]
         })
@@ -154,14 +318,23 @@ export default function App() {
           
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-white/70 mb-1 uppercase">API Key của Google Gemini</label>
-              <input 
-                type="text" 
-                value={apiKey} 
-                onChange={e => setApiKey(e.target.value)} 
-                placeholder="Dán API Key của bạn vào đây" 
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
-              />
+              <label className="block text-xs font-semibold text-white/70 mb-1.5 uppercase">API Key của Google Gemini</label>
+              <div className="relative">
+                <input 
+                  type={showKey ? 'text' : 'password'} 
+                  value={apiKey} 
+                  onChange={e => setApiKey(e.target.value)} 
+                  placeholder="Dán API Key của bạn vào đây" 
+                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowKey(!showKey)} 
+                  className="absolute right-3 top-3 text-white/50 hover:text-white/80 transition-colors"
+                >
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
             <div className="bg-white/5 p-4 rounded-xl text-sm text-white/70 space-y-2 border border-white/10">
@@ -181,7 +354,7 @@ export default function App() {
                 value={password} 
                 onChange={e => setPassword(e.target.value)} 
                 placeholder="Nhập mật khẩu để sử dụng" 
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
               />
             </div>
 
@@ -213,6 +386,38 @@ export default function App() {
                 <option className="bg-slate-800 text-white" value="gemini-1.5-flash">Gemini 1.5 Flash (Nhanh)</option>
                 <option className="bg-slate-800 text-white" value="gemini-1.5-pro">Gemini 1.5 Pro (Nâng cao)</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-white/70 mb-1.5 uppercase">Tải đề bài lên (Mô tả đề thi/Hình vẽ mẫu)</label>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <label className="cursor-pointer flex-1 flex items-center justify-center gap-2 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-250 text-xs font-bold py-2.5 px-4 rounded-xl transition-all">
+                    <Upload className="w-4 h-4 text-indigo-300" />
+                    <span>Chọn File Đề Bài</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      onChange={handleImageChange} 
+                      className="hidden" 
+                    />
+                  </label>
+                  {image && (
+                    <button 
+                      onClick={() => { setImage(null); setImageMime(''); }} 
+                      type="button"
+                      className="bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 px-4 py-2.5 rounded-xl font-bold text-xs"
+                    >
+                      Xóa Ảnh
+                    </button>
+                  )}
+                </div>
+                {image && (
+                  <div className="relative border border-white/10 rounded-xl overflow-hidden bg-black/20 p-2 max-h-48 flex justify-center">
+                    <img src={image} alt="Problem Preview" className="max-h-40 object-contain rounded-lg" />
+                  </div>
+                )}
+              </div>
             </div>
 
             <div>
@@ -283,36 +488,53 @@ export default function App() {
                   </ul>
                 </div>
               </div>
-            ) : !result && !loading ? (
+            ) : (!result && loading) ? (
+              <div className="text-center py-12 flex flex-col items-center">
+                <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-500 border-t-indigo-200 mb-4"></div>
+                <p className="text-indigo-300 font-semibold animate-pulse">Đang phân tích đề và sinh mã GeoGebra...</p>
+              </div>
+            ) : !result ? (
               <div className="text-center max-w-md w-full py-4">
                 <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/10">
                   <FolderPlus className="w-10 h-10 sm:w-12 sm:h-12 text-white/30" strokeWidth={1.5} />
                 </div>
                 <h3 className="font-bold text-white text-lg mb-2">Chưa có mã nào được tạo</h3>
                 <p className="text-white/50 text-sm leading-relaxed max-w-xs mx-auto">
-                  Vui lòng nhập nội dung để AI lập trình lệnh GeoGebra minh họa.
+                  Vui lòng nhập nội dung hoặc chọn tệp đề bài để AI lập trình lệnh GeoGebra minh họa.
                 </p>
               </div>
-            ) : loading ? (
-              <div className="text-center py-12 flex flex-col items-center">
-                <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-500 border-t-indigo-200 mb-4"></div>
-                <p className="text-indigo-300 font-semibold animate-pulse">Đang sinh mã GeoGebra...</p>
-              </div>
             ) : (
-              <div className="animate-in fade-in duration-300 w-full text-left">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-xs font-mono text-green-400 uppercase tracking-widest">GeoGebra Script</span>
-                  <button 
-                    onClick={copyToClipboard} 
-                    className="text-xs bg-white/10 hover:bg-white/20 text-white font-semibold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors border border-white/20"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied ? 'Đã Copy' : 'Copy Code'}
-                  </button>
+              <div className="animate-in fade-in duration-300 w-full text-left space-y-6 relative">
+                {loading && (
+                  <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center rounded-2xl p-4 text-center">
+                    <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-400 border-t-transparent mb-3"></div>
+                    <p className="text-white font-semibold text-sm animate-pulse">Đang cập nhật hình vẽ hoặc mã lệnh...</p>
+                  </div>
+                )}
+
+                <div>
+                  <h3 className="text-xs font-mono text-purple-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>Bản vẽ GeoGebra trực quan (Hệ thống tự động vẽ)</span>
+                  </h3>
+                  <GeoGebraViewer script={result} />
                 </div>
-                <pre className="bg-black/40 p-5 rounded-xl overflow-x-auto text-[13px] font-mono whitespace-pre-wrap leading-relaxed shadow-inner border border-white/5 text-blue-200">
-                  <code>{result}</code>
-                </pre>
+
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-xs font-mono text-green-400 uppercase tracking-widest">GeoGebra Script</span>
+                    <button 
+                      onClick={copyToClipboard} 
+                      className="text-xs bg-white/10 hover:bg-white/20 text-white font-semibold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors border border-white/20"
+                    >
+                      {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copied ? 'Đã Copy' : 'Copy Code'}
+                    </button>
+                  </div>
+                  <pre className="bg-black/40 p-5 rounded-xl overflow-x-auto text-[13px] font-mono whitespace-pre-wrap leading-relaxed shadow-inner border border-white/5 text-blue-200">
+                    <code>{result}</code>
+                  </pre>
+                </div>
               </div>
             )}
           </div>
