@@ -210,38 +210,114 @@ export default function App() {
     setCopied(false);
 
     try {
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          prompt,
-          additionalPrompt,
-          image,
-          imageMime,
-          userApiKey: apiKey
-        })
-      });
+      let dataText = '';
+      const systemInstructionText = "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình hoặc đề bài toán học của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) chính xác để minh họa cấu trúc toán học đó. Bạn hãy sử dụng các lệnh GeoGebra chuẩn bằng tiếng Anh (như Point, Line, Circle, Segment, Polygon, Intersect, Midpoint, Angle) hoặc bằng tiếng Việt (như Điểm, ĐườngThẳng, ĐườngTròn, ĐoạnThẳng, ĐaGiác, GiaoĐiểm, TrungĐiểm, Góc) để tương thích hoàn hảo với tệp tài nguyên Việt hóa. Chỉ trả về mã lệnh dưới dạng plain text, đặt mỗi câu lệnh trên một dòng mới độc lập, không có giải thích dài dòng và không nằm trong các block markdown (như ```geogebra).";
 
-      if (!response.ok) {
-        let descriptiveError = `Lỗi API (${response.status} ${response.statusText})`;
-        try {
-          const errData = await response.json();
-          if (errData?.error?.message) {
-            descriptiveError = errData.error.message;
-          }
-        } catch (e) {
-          // ignore parsing fail, fallback to status code
+      if (apiKey && apiKey.trim()) {
+        // Direct client-side Gemini API call using user's custom API key (helpful on GitHub Pages / static hosting)
+        const fullPrompt = additionalPrompt 
+          ? `${prompt}\n\nYêu cầu bổ sung:\n${additionalPrompt}` 
+          : prompt;
+
+        const parts: any[] = [];
+
+        if (image) {
+          const base64Data = image.includes(',') ? image.split(',')[1] : image;
+          parts.push({
+            inlineData: {
+              mimeType: imageMime || 'image/jpeg',
+              data: base64Data
+            }
+          });
         }
-        throw new Error(descriptiveError);
+
+        parts.push({ 
+          text: `Đề bài: ${fullPrompt || "Hãy vẽ hình theo mẫu trong file ảnh hoặc giải quyết đề thi trong ảnh."}` 
+        });
+
+        const activeModel = model;
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey.trim()}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: systemInstructionText }]
+            },
+            contents: [
+              {
+                role: "user",
+                parts: parts
+              }
+            ]
+          })
+        });
+
+        if (!response.ok) {
+          let descriptiveError = `Lỗi API (${response.status} ${response.statusText})`;
+          try {
+            const errData = await response.json();
+            if (errData?.error?.message) {
+              descriptiveError = errData.error.message;
+            }
+          } catch (e) {
+            // ignore
+          }
+          throw new Error(descriptiveError);
+        }
+
+        const data = await response.json();
+        if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+          dataText = data.candidates[0].content.parts[0].text;
+        } else {
+          throw new Error("Không nhận được kết quả từ khoá API Gemini của bạn.");
+        }
+
+      } else {
+        // Call backend proxy API
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model,
+            prompt,
+            additionalPrompt,
+            image,
+            imageMime,
+            userApiKey: apiKey
+          })
+        });
+
+        if (!response.ok) {
+          let descriptiveError = `Lỗi API (${response.status} ${response.statusText})`;
+          if (response.status === 404) {
+            descriptiveError = "Lỗi kết nối máy chủ (404). Nếu bạn đang chạy ứng dụng này trên GitHub Pages (hoặc môi trường hosting tĩnh không chạy Node.js server), vui lòng cấu hình/nhập khóa Gemini API của riêng bạn ở ô cấu hình API Key bên trên để ứng dụng hoạt động trực tiếp từ trình duyệt!";
+          } else {
+            try {
+              const errData = await response.json();
+              if (errData?.error?.message) {
+                descriptiveError = errData.error.message;
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+          throw new Error(descriptiveError);
+        }
+
+        const data = await response.json();
+        if (data.text) {
+          dataText = data.text;
+        } else {
+          throw new Error("Không nhận được kết quả hợp lệ từ máy chủ API.");
+        }
       }
 
-      const data = await response.json();
-      
-      if (data.text) {
-        let text = data.text.trim();
+      if (dataText) {
+        let text = dataText.trim();
         // Fallback cleanup if the model still returns markdown code block markers
         if (text.startsWith('```')) {
             const lines = text.split('\n');
