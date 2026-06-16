@@ -133,6 +133,8 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
 
 export default function App() {
   const [model, setModel] = useState('gemini-3.5-flash');
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   
@@ -144,6 +146,18 @@ export default function App() {
   const [result, setResult] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const savedKey = localStorage.getItem('geogebra_assistant_api_key');
+    if (savedKey) setApiKey(savedKey);
+  }, []);
+
+  const saveConfig = () => {
+    const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
+    setApiKey(cleanKey);
+    localStorage.setItem('geogebra_assistant_api_key', cleanKey);
+    alert('Đã lưu cấu hình API Key thành công!');
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -198,7 +212,8 @@ export default function App() {
           prompt,
           additionalPrompt,
           image,
-          imageMime
+          imageMime,
+          userApiKey: apiKey
         })
       });
 
@@ -251,6 +266,60 @@ export default function App() {
             Tạo hình vẽ Toán qua mô tả bằng GeoGebra
           </p>
         </header>
+
+        {/* Configuration Card */}
+        <section className="bg-white/10 backdrop-blur-xl rounded-2xl p-5 border border-white/20 shadow-xl overflow-hidden flex flex-col">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertCircle className="text-pink-400 w-6 h-6" strokeWidth={2.5} />
+            <h2 className="text-lg font-bold text-white tracking-tight">Cấu Hình API Key (Không bắt buộc)</h2>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs text-white/70 mb-3 leading-relaxed">
+                Mặc định hệ thống sẽ sử dụng API Key cấu hình từ máy chủ. Nếu muốn dùng API Key của riêng bạn (để không bị giới hạn hoặc khi deploy lên GitHub), hãy nhập ở đây. Khóa này chỉ lưu trong trình duyệt của bạn (Local Storage) nên tuyệt đối an toàn.
+              </p>
+              <label className="block text-xs font-semibold text-white/70 mb-1.5 uppercase">API Key của Google Gemini</label>
+              <div className="relative">
+                <input 
+                  type={showKey ? 'text' : 'password'} 
+                  value={apiKey} 
+                  onChange={e => setApiKey(e.target.value)} 
+                  placeholder="Nhập API Key của bạn (AI Studio)" 
+                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/45 transition-colors" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowKey(!showKey)} 
+                  className="absolute right-3 top-3.5 text-white/50 hover:text-white/80 transition-colors"
+                >
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button 
+                onClick={saveConfig} 
+                className="flex-1 bg-purple-600 hover:bg-purple-700 active:scale-[0.98] text-white font-bold py-2.5 rounded-xl text-xs transition-colors shadow-md"
+              >
+                Lưu Cấu Hình Key
+              </button>
+              {apiKey && (
+                <button 
+                  onClick={() => {
+                    setApiKey('');
+                    localStorage.removeItem('geogebra_assistant_api_key');
+                    alert('Đã xóa API Key đã lưu thành công!');
+                  }} 
+                  className="bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors"
+                >
+                  Xóa Key đã lưu
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
 
         {/* Creation Card */}
         <section className="bg-white/10 backdrop-blur-xl rounded-2xl p-5 border border-white/20 shadow-xl overflow-hidden flex flex-col">

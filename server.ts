@@ -16,13 +16,13 @@ async function startServer() {
   // Endpoint to securely proxy Gemini API requests
   app.post("/api/generate", async (req, res) => {
     try {
-      const { model, prompt, additionalPrompt, image, imageMime } = req.body;
+      const { model, prompt, additionalPrompt, image, imageMime, userApiKey } = req.body;
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = (userApiKey && userApiKey.trim()) || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(500).json({
           error: {
-            message: "Không tìm thấy cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thiết lập biến môi trường này trong cấu hình Secrets hoặc file .env."
+            message: "Không tìm thấy cấu hình GEMINI_API_KEY. Vui lòng cấu hình khoá API bằng cách nhập và lưu API Key trên giao diện của bạn hoặc thiết lập biến môi trường trên máy chủ/file .env."
           }
         });
       }
