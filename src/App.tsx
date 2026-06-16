@@ -148,15 +148,23 @@ export default function App() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const savedKey = localStorage.getItem('geogebra_assistant_api_key');
+    const savedKey = sessionStorage.getItem('geogebra_assistant_api_key') || localStorage.getItem('geogebra_assistant_api_key');
     if (savedKey) setApiKey(savedKey);
   }, []);
+
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    const cleanKey = value.trim().replace(/^["']|["']$/g, '');
+    sessionStorage.setItem('geogebra_assistant_api_key', cleanKey);
+    localStorage.setItem('geogebra_assistant_api_key', cleanKey);
+  };
 
   const saveConfig = () => {
     const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
     setApiKey(cleanKey);
+    sessionStorage.setItem('geogebra_assistant_api_key', cleanKey);
     localStorage.setItem('geogebra_assistant_api_key', cleanKey);
-    alert('Đã lưu cấu hình API Key thành công!');
+    alert('Đã lưu cấu hình API Key vào bộ nhớ trình duyệt thành công!');
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,7 +292,7 @@ export default function App() {
                 <input 
                   type={showKey ? 'text' : 'password'} 
                   value={apiKey} 
-                  onChange={e => setApiKey(e.target.value)} 
+                  onChange={e => handleApiKeyChange(e.target.value)} 
                   placeholder="Nhập API Key của bạn (AI Studio)" 
                   className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/45 transition-colors" 
                 />
@@ -296,6 +304,15 @@ export default function App() {
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {apiKey ? (
+                <span className="text-[10px] text-green-400 font-medium block mt-1 animate-pulse">
+                  ✓ Đã tự động lưu vào bộ nhớ tạm và sẵn sàng sử dụng
+                </span>
+              ) : (
+                <span className="text-[10px] text-white/40 font-medium block mt-1">
+                  Khoá này sẽ tự động lưu tạm khi bạn vừa nhập hoặc dán vào.
+                </span>
+              )}
             </div>
 
             <div className="flex gap-2">
@@ -309,8 +326,9 @@ export default function App() {
                 <button 
                   onClick={() => {
                     setApiKey('');
+                    sessionStorage.removeItem('geogebra_assistant_api_key');
                     localStorage.removeItem('geogebra_assistant_api_key');
-                    alert('Đã xóa API Key đã lưu thành công!');
+                    alert('Đã xóa API Key thành công!');
                   }} 
                   className="bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/30 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors"
                 >
