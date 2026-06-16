@@ -13,7 +13,7 @@ interface GeoGebraViewerProps {
 }
 
 function GeoGebraViewer({ script }: GeoGebraViewerProps) {
-  const containerId = "ggb-applet-inner-container";
+  const containerRef = useRef<HTMLDivElement>(null);
   const [apiReady, setApiReady] = useState<any>(null);
   const initializedRef = useRef<boolean>(false);
   const callbackNameRef = useRef<string>("");
@@ -21,6 +21,10 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
   useEffect(() => {
     let timer: any;
     
+    // Define a stable global fallback as well
+    const callbackName = `onGeoGebraReady_${Math.random().toString(36).substring(2, 9)}`;
+    callbackNameRef.current = callbackName;
+
     const initApplet = () => {
       // Wait until GGBApplet loader script is loaded on window
       if (!window.GGBApplet) {
@@ -28,39 +32,62 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
         return;
       }
 
-      if (initializedRef.current) return;
+      if (initializedRef.current || !containerRef.current) return;
       initializedRef.current = true;
 
-      // Define a unique global callback name for this instance
-      const callbackName = `onGeoGebraReady_${Math.random().toString(36).substring(2, 9)}`;
-      callbackNameRef.current = callbackName;
+      // Clear any prior content
+      if (containerRef.current) {
+        containerRef.current.innerHTML = "";
+      }
 
+      // Create a dedicated inner element to prevent React Virtual DOM reconciliation interference
+      const innerTarget = document.createElement('div');
+      innerTarget.id = `ggb-inner-host-${Math.random().toString(36).substring(2, 7)}`;
+      innerTarget.style.width = '100%';
+      innerTarget.style.height = '100%';
+      containerRef.current.appendChild(innerTarget);
+
+      // Define callback function in window scope
       (window as any)[callbackName] = (api: any) => {
-        console.log("GeoGebra API loaded and ready:", api);
+        console.log("GeoGebra API loaded and ready via callback:", api);
         setApiReady(api);
+        window.ggbApplet = api;
+      };
+
+      // Also register ggbOnInit as a global fallback
+      (window as any).ggbOnInit = (id: string, api: any) => {
+        console.log("ggbOnInit fallback:", id, api);
+        const actualApi = api || (window as any)[id] || window.ggbApplet;
+        if (actualApi) {
+          setApiReady(actualApi);
+          window.ggbApplet = actualApi;
+        }
       };
 
       const params = {
+        id: 'ggbApplet',
         appName: 'classic',
         width: '100%',
         height: '100%',
         showToolBar: false,
         showMenuBar: false,
-        showAlgebraInput: true,
+        showAlgebraInput: false,
         useBrowserForJS: true, // MUST BE true to trigger appletOnLoad callback
         enableShiftDragZoom: true,
+        enableRightClick: false,
         errorDialogsActive: false,
         isHTML5: true,
-        language: 'vi', // Strict Vietnamese language setting for Vietnamese GGB scripts
+        language: 'en', // Strict Standard English language setting for English GGB scripts
         allowRescale: true, // Make applet responsive inside containment flexboxes
         appletOnLoad: callbackName,
       };
 
       try {
+        console.log("Injecting GGBApplet with params:", params);
         const applet = new window.GGBApplet(params, true);
-        applet.inject(containerId);
+        applet.inject(innerTarget.id);
       } catch (err) {
-        console.error("Error creating GGBApplet:", err);
+        console.error("Error creating or injecting GGBApplet:", err);
       }
     };
 
@@ -68,6 +95,7 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
 
     return () => {
       clearTimeout(timer);
+      initializedRef.current = false; // MUST reset on cleanup to prevent stuck loading on React strict mode remounts
       if (callbackNameRef.current && (window as any)[callbackNameRef.current]) {
         delete (window as any)[callbackNameRef.current];
       }
@@ -79,6 +107,7 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
     if (!apiReady || !script) return;
 
     try {
+      console.log("Evaluating script in GeoGebraViewer...", script);
       if (apiReady.newConstruction) {
         apiReady.newConstruction();
       } else if (apiReady.reset) {
@@ -108,9 +137,9 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
   return (
     <div className="w-full bg-white rounded-xl overflow-hidden border border-white/20 p-2 shadow-inner">
       <div className="relative w-full h-[400px] min-h-[400px] bg-white rounded-lg flex flex-col justify-center items-center overflow-hidden">
-        {/* Target container for GGBApplet inject - Always fully visible to prevent measuring/rendering locks */}
+        {/* Target container for GGBApplet inject - managed dynamically via ref */}
         <div 
-          id={containerId} 
+          ref={containerRef} 
           className="absolute inset-0 w-full h-full bg-white"
         />
         
@@ -195,6 +224,52 @@ export default function App() {
       navigator.clipboard.writeText(result);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const drawFromAI = () => {
+    const ggb = window.ggbApplet || (window as any).ggbApplet;
+    if (!ggb) {
+      alert("Bảng vẽ GeoGebra chưa sẵn sàng hoặc chưa được khởi tạo!");
+      return;
+    }
+
+    try {
+      // Clear old drawing (reset) before drawing new
+      if (ggb.reset) {
+        ggb.reset();
+      } else if (ggb.newConstruction) {
+        ggb.newConstruction();
+      }
+
+      // Default grid and axes
+      ggb.evalCommand('ShowAxes(true)');
+      ggb.evalCommand('ShowGrid(true)');
+
+      // Read from textarea with id="ai-commands"
+      const textarea = document.getElementById('ai-commands') as HTMLTextAreaElement | null;
+      const scriptContent = textarea ? textarea.value : result;
+
+      // Sync React state if manual changes were made to textarea
+      if (textarea && textarea.value !== result) {
+        setResult(textarea.value);
+      }
+
+      // Separate each line command and execute on GeoGebra
+      const commands = scriptContent.split('\n');
+      commands.forEach((cmd) => {
+        const cleanCmd = cmd.trim();
+        if (cleanCmd !== "" && !cleanCmd.startsWith('//') && !cleanCmd.startsWith('#')) {
+          try {
+            ggb.evalCommand(cleanCmd);
+          } catch (e) {
+            console.warn("Lỗi thực thi lệnh GeoGebra:", cleanCmd, e);
+          }
+        }
+      });
+    } catch (err: any) {
+      console.error("Lỗi vẽ hình ggb:", err);
+      alert("Có lỗi xảy ra khi vẽ hình: " + err.message);
     }
   };
 
@@ -568,19 +643,36 @@ export default function App() {
                 </div>
 
                 <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="text-xs font-mono text-green-400 uppercase tracking-widest">GeoGebra Script</span>
-                    <button 
-                      onClick={copyToClipboard} 
-                      className="text-xs bg-white/10 hover:bg-white/20 text-white font-semibold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors border border-white/20"
-                    >
-                      {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      {copied ? 'Đã Copy' : 'Copy Code'}
-                    </button>
+                  <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
+                    <span className="text-xs font-mono text-green-400 uppercase tracking-widest flex items-center gap-1">
+                      <PenTool className="w-3.5 h-3.5 text-green-400" />
+                      <span>GeoGebra Script (Bấm Vẽ từ AI để cập nhật)</span>
+                    </span>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={drawFromAI} 
+                        className="text-xs bg-emerald-600/30 hover:bg-emerald-600/50 hover:text-emerald-250 text-emerald-300 font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-all border border-emerald-500/30 active:scale-[0.97]"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
+                        <span>Vẽ từ AI (drawFromAI)</span>
+                      </button>
+                      <button 
+                        onClick={copyToClipboard} 
+                        className="text-xs bg-white/10 hover:bg-white/20 text-white font-semibold py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-colors border border-white/20"
+                      >
+                        {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copied ? 'Đã Copy' : 'Copy Code'}
+                      </button>
+                    </div>
                   </div>
-                  <pre className="bg-black/40 p-5 rounded-xl overflow-x-auto text-[13px] font-mono whitespace-pre-wrap leading-relaxed shadow-inner border border-white/5 text-blue-200">
-                    <code>{result}</code>
-                  </pre>
+                  <textarea 
+                    id="ai-commands"
+                    value={result}
+                    onChange={(e) => setResult(e.target.value)}
+                    rows={10}
+                    placeholder="Nhập hoặc chỉnh sửa các lệnh GeoGebra script tại đây..."
+                    className="w-full bg-black/40 p-5 rounded-2xl text-[13px] font-mono whitespace-pre text-blue-200 border border-white/5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 font-medium leading-relaxed resize-y select-text shadow-inner transition-all block"
+                  />
                 </div>
               </div>
             )}
