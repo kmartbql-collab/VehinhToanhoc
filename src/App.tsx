@@ -132,10 +132,7 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState('');
-  const [password, setPassword] = useState('');
-  const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState('gemini-3.5-flash');
   const [prompt, setPrompt] = useState('');
   const [additionalPrompt, setAdditionalPrompt] = useState('');
   
@@ -148,13 +145,6 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const savedKey = localStorage.getItem('geogebra_assistant_api_key');
-    if (savedKey) setApiKey(savedKey);
-    const savedPassword = localStorage.getItem('geogebra_assistant_pwd');
-    if (savedPassword) setPassword(savedPassword);
-  }, []);
-
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -166,21 +156,6 @@ export default function App() {
       setImageMime(file.type);
     };
     reader.readAsDataURL(file);
-  };
-
-  const saveConfig = () => {
-    // Clean key of leading/trailing quotes or spaces
-    const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
-    if (!cleanKey) {
-      alert('Vui lòng nhập API Key hợp lệ.');
-      return;
-    }
-    setApiKey(cleanKey);
-    localStorage.setItem('geogebra_assistant_api_key', cleanKey);
-    if (password) {
-      localStorage.setItem('geogebra_assistant_pwd', password);
-    }
-    alert('Đã lưu cấu hình thành công!');
   };
 
   const resetForm = () => {
@@ -202,11 +177,6 @@ export default function App() {
   };
 
   const generate = async () => {
-    const cleanKey = apiKey.trim().replace(/^["']|["']$/g, '');
-    if (!cleanKey) {
-      alert('Vui lòng nhập và lưu API Key trước khi sử dụng.');
-      return;
-    }
     if (!prompt.trim() && !image) {
        alert('Vui lòng nhập nội dung yêu cầu hoặc tải ảnh đề thi lên.');
        return;
@@ -218,44 +188,17 @@ export default function App() {
     setCopied(false);
 
     try {
-      const fullPrompt = additionalPrompt 
-        ? `${prompt}\n\nYêu cầu bổ sung:\n${additionalPrompt}` 
-        : prompt;
-
-      const parts: any[] = [];
-
-      if (image) {
-        const base64Data = image.split(',')[1];
-        parts.push({
-          inlineData: {
-            mimeType: imageMime || 'image/jpeg',
-            data: base64Data
-          }
-        });
-      }
-
-      parts.push({ 
-        text: `Đề bài: ${fullPrompt || "Hãy vẽ hình theo mẫu trong file ảnh hoặc giải quyết đề thi trong ảnh."}` 
-      });
-
-      // Ensure we query the models using v1beta or secure endpoints
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`, {
+      const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [
-              { text: "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình hoặc đề bài toán học của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) chính xác để minh họa cấu trúc toán học đó. Bạn hãy sử dụng các lệnh GeoGebra chuẩn bằng tiếng Anh (như Point, Line, Circle, Segment, Polygon, Intersect, Midpoint, Angle) hoặc bằng tiếng Việt (như Điểm, ĐườngThẳng, ĐườngTròn, ĐoạnThẳng, ĐaGiác, GiaoĐiểm, TrungĐiểm, Góc) để tương thích hoàn hảo với tệp tài nguyên Việt hóa. Chỉ trả về mã lệnh dưới dạng plain text, đặt mỗi câu lệnh trên một dòng mới độc lập, không có giải thích dài dòng và không nằm trong các block markdown (như ```geogebra)." }
-            ]
-          },
-          contents: [
-            {
-              role: "user",
-              parts: parts
-            }
-          ]
+          model,
+          prompt,
+          additionalPrompt,
+          image,
+          imageMime
         })
       });
 
@@ -264,7 +207,7 @@ export default function App() {
         try {
           const errData = await response.json();
           if (errData?.error?.message) {
-            descriptiveError = `${errData.error.message} (Status: ${errData.error.status || response.status})`;
+            descriptiveError = errData.error.message;
           }
         } catch (e) {
           // ignore parsing fail, fallback to status code
@@ -274,8 +217,8 @@ export default function App() {
 
       const data = await response.json();
       
-      if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
-        let text = data.candidates[0].content.parts[0].text.trim();
+      if (data.text) {
+        let text = data.text.trim();
         // Fallback cleanup if the model still returns markdown code block markers
         if (text.startsWith('```')) {
             const lines = text.split('\n');
@@ -309,64 +252,6 @@ export default function App() {
           </p>
         </header>
 
-        {/* Configuration Card */}
-        <section className="bg-white/10 backdrop-blur-xl rounded-2xl p-5 border border-white/20 shadow-xl overflow-hidden flex flex-col">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="text-red-500 w-6 h-6" strokeWidth={2.5} />
-            <h2 className="text-lg font-bold text-white tracking-tight">Cấu Hình Ban Đầu</h2>
-          </div>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-white/70 mb-1.5 uppercase">API Key của Google Gemini</label>
-              <div className="relative">
-                <input 
-                  type={showKey ? 'text' : 'password'} 
-                  value={apiKey} 
-                  onChange={e => setApiKey(e.target.value)} 
-                  placeholder="Dán API Key của bạn vào đây" 
-                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-10 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setShowKey(!showKey)} 
-                  className="absolute right-3 top-3 text-white/50 hover:text-white/80 transition-colors"
-                >
-                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white/5 p-4 rounded-xl text-sm text-white/70 space-y-2 border border-white/10">
-              <p className="text-[10px] sm:text-xs font-bold text-purple-400 uppercase mb-2">Hướng dẫn lấy API Key:</p>
-              <ol className="list-decimal list-inside space-y-1.5 ml-1 text-xs">
-                <li>Truy cập <a href="https://aistudio.google.com/" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 font-medium underline">Google AI Studio</a></li>
-                <li>Đăng nhập bằng tài khoản Google của bạn</li>
-                <li>Bấm <strong>Get API key</strong> ở menu điều hướng</li>
-                <li>Tạo khóa, sao chép và dán vào ô trống phía trên</li>
-              </ol>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-white/70 mb-1 uppercase">Mật khẩu</label>
-              <input 
-                type="password" 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-                placeholder="Nhập mật khẩu để sử dụng" 
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-white/40 transition-colors" 
-              />
-            </div>
-
-            <button 
-              onClick={saveConfig} 
-              className="w-full bg-red-500 hover:bg-red-600 active:scale-[0.98] text-white font-bold py-2 sm:py-3 rounded-xl text-sm transition-colors shadow-md"
-            >
-              Lưu Cấu Hình
-            </button>
-          </div>
-        </section>
-
         {/* Creation Card */}
         <section className="bg-white/10 backdrop-blur-xl rounded-2xl p-5 border border-white/20 shadow-xl overflow-hidden flex flex-col">
           <div className="flex items-center gap-2 mb-4">
@@ -382,9 +267,8 @@ export default function App() {
                 onChange={e => setModel(e.target.value)} 
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
-                <option className="bg-slate-800 text-white" value="gemini-2.5-flash">Gemini 2.5 Flash (Khuyên dùng)</option>
-                <option className="bg-slate-800 text-white" value="gemini-1.5-flash">Gemini 1.5 Flash (Nhanh)</option>
-                <option className="bg-slate-800 text-white" value="gemini-1.5-pro">Gemini 1.5 Pro (Nâng cao)</option>
+                <option className="bg-slate-800 text-white" value="gemini-3.5-flash">Gemini 3.5 Flash (Khuyên dùng)</option>
+                <option className="bg-slate-800 text-white" value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Nâng cao)</option>
               </select>
             </div>
 
@@ -481,10 +365,10 @@ export default function App() {
                 <div className="pt-2 text-xs text-white/70 space-y-1.5 border-t border-white/10">
                   <p className="font-semibold text-white/90">Hướng dẫn khắc phục:</p>
                   <ul className="list-disc list-inside space-y-1 pl-1">
-                    <li>Kiểm tra xem API Key đã được điền chính xác chưa và bấm <strong>Lưu cấu hình</strong>.</li>
-                    <li>Đảm bảo dịch vụ <strong className="text-indigo-300">Generative Language API</strong> đã được kích hoạt trong Google Cloud.</li>
-                    <li>Thử chọn mô hình khác như <strong className="text-indigo-300">Gemini 1.5 Flash</strong> ở mục lựa chọn mô hình.</li>
-                    <li>Nếu lỗi liên quan đến quốc gia (User location is not supported), bạn có thể cần kiểm tra vị trí địa lý của mạng internet hoặc sử dụng proxy/VPN.</li>
+                    <li>Đảm bảo biến môi trường <strong className="text-indigo-300">GEMINI_API_KEY</strong> đã được cấu hình chính xác trên máy chủ hoặc trong file <code>.env</code>.</li>
+                    <li>Đảm bảo dịch vụ <strong className="text-indigo-300">Generative Language API</strong> đã được kích hoạt trong trang quản trị Google Cloud của khoá API.</li>
+                    <li>Thử chọn cấu hình mô hình khác (như <strong>Gemini 3.5 Flash</strong>) để xem phản hồi.</li>
+                    <li>Nếu lỗi liên quan đến quốc gia (User location is not supported), máy chủ của bạn cần đổi vùng địa lý hoặc sử dụng cấu hình ủy quyền proxy.</li>
                   </ul>
                 </div>
               </div>
