@@ -14,68 +14,65 @@ interface GeoGebraViewerProps {
 
 function GeoGebraViewer({ script }: GeoGebraViewerProps) {
   const containerId = "ggb-applet-inner-container";
-  const [loaded, setLoaded] = useState(false);
   const [apiReady, setApiReady] = useState<any>(null);
   const initializedRef = useRef<boolean>(false);
+  const callbackNameRef = useRef<string>("");
 
-  // Load GeoGebra deployggb.js loader script
   useEffect(() => {
-    if (window.GGBApplet) {
-      setLoaded(true);
-      return;
-    }
-    const scriptTag = document.createElement('script');
-    scriptTag.src = 'https://www.geogebra.org/apps/deployggb.js';
-    scriptTag.async = true;
-    scriptTag.onload = () => {
-      setLoaded(true);
-    };
-    scriptTag.onerror = () => {
-      console.error("Failed to load GeoGebra deployggb.js script");
-    };
-    document.body.appendChild(scriptTag);
-  }, []);
+    let timer: any;
+    
+    const initApplet = () => {
+      // Wait until GGBApplet loader script is loaded on window
+      if (!window.GGBApplet) {
+        timer = setTimeout(initApplet, 100);
+        return;
+      }
 
-  // Initialize GGBApplet strictly ONCE
-  useEffect(() => {
-    if (!loaded || initializedRef.current) return;
-    initializedRef.current = true;
+      if (initializedRef.current) return;
+      initializedRef.current = true;
 
-    // We register a global callback that GeoGebra can invoke on load
-    const globalCallbackName = "onGeoGebraAppletReady";
-    (window as any)[globalCallbackName] = (api: any) => {
-      console.log("GeoGebra API loaded and ready:", api);
-      setApiReady(api);
+      // Define a unique global callback name for this instance
+      const callbackName = `onGeoGebraReady_${Math.random().toString(36).substring(2, 9)}`;
+      callbackNameRef.current = callbackName;
+
+      (window as any)[callbackName] = (api: any) => {
+        console.log("GeoGebra API loaded and ready:", api);
+        setApiReady(api);
+      };
+
+      const params = {
+        appName: 'classic',
+        width: '100%',
+        height: '100%',
+        showToolBar: false,
+        showMenuBar: false,
+        showAlgebraInput: true,
+        useBrowserForJS: true, // MUST BE true to trigger appletOnLoad callback
+        enableShiftDragZoom: true,
+        errorDialogsActive: false,
+        isHTML5: true,
+        language: 'vi', // Strict Vietnamese language setting for Vietnamese GGB scripts
+        allowRescale: true, // Make applet responsive inside containment flexboxes
+        appletOnLoad: callbackName,
+      };
+
+      try {
+        const applet = new window.GGBApplet(params, true);
+        applet.inject(containerId);
+      } catch (err) {
+        console.error("Error creating GGBApplet:", err);
+      }
     };
 
-    const params = {
-      appName: 'classic',
-      width: '100%',
-      height: '100%',
-      showToolBar: false,
-      showMenuBar: false,
-      showAlgebraInput: true,
-      useBrowserForJS: true, // MUST BE true to trigger script loading and appletOnLoad callback
-      enableShiftDragZoom: true,
-      errorDialogsActive: false,
-      isHTML5: true,
-      language: 'vi', // Strict Vietnamese language setting for Vietnamese GGB scripts
-      allowRescale: true, // Make applet responsive inside containment flexboxes
-      appletOnLoad: globalCallbackName,
-    };
-
-    try {
-      const applet = new window.GGBApplet(params, true);
-      applet.inject(containerId);
-    } catch (err) {
-      console.error("Error creating GGBApplet:", err);
-    }
+    initApplet();
 
     return () => {
-      // Cleanup global callback on unmount
-      delete (window as any)[globalCallbackName];
+      clearTimeout(timer);
+      if (callbackNameRef.current && (window as any)[callbackNameRef.current]) {
+        delete (window as any)[callbackNameRef.current];
+      }
     };
-  }, [loaded]);
+  }, []);
 
   // Execute Commands on Script/API state change
   useEffect(() => {
@@ -117,15 +114,18 @@ function GeoGebraViewer({ script }: GeoGebraViewerProps) {
           className="absolute inset-0 w-full h-full bg-white"
         />
         
-        {!apiReady && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 z-10 bg-slate-900 text-indigo-250 text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-400 border-t-transparent"></div>
-            <p className="text-sm font-semibold animate-pulse">Đang chuẩn bị bảng vẽ GeoGebra...</p>
-            <p className="text-xs text-indigo-300/60 max-w-xs leading-relaxed">
-              Hệ thống đang tải thư viện toán học từ máy chủ GeoGebra. Quá trình này có thể mất vài giây.
-            </p>
-          </div>
-        )}
+        {/* Loading overlay container - stays in DOM to prevent React DOM reconciliation interference */}
+        <div 
+          className={`absolute inset-0 flex flex-col items-center justify-center p-6 space-y-3 z-10 bg-slate-900 text-indigo-200 text-center transition-all duration-300 ${
+            apiReady ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-400 border-t-transparent"></div>
+          <p className="text-sm font-semibold animate-pulse">Đang chuẩn bị bảng vẽ GeoGebra...</p>
+          <p className="text-xs text-indigo-300/60 max-w-xs leading-relaxed">
+            Hệ thống đang tải thư viện toán học từ máy chủ GeoGebra. Quá trình này có thể mất vài giây.
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -211,7 +211,7 @@ export default function App() {
 
     try {
       let dataText = '';
-      const systemInstructionText = "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình hoặc đề bài toán học của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) chính xác để minh họa cấu trúc toán học đó. Bạn hãy sử dụng các lệnh GeoGebra chuẩn bằng tiếng Anh (như Point, Line, Circle, Segment, Polygon, Intersect, Midpoint, Angle) hoặc bằng tiếng Việt (như Điểm, ĐườngThẳng, ĐườngTròn, ĐoạnThẳng, ĐaGiác, GiaoĐiểm, TrungĐiểm, Góc) để tương thích hoàn hảo với tệp tài nguyên Việt hóa. Chỉ trả về mã lệnh dưới dạng plain text, đặt mỗi câu lệnh trên một dòng mới độc lập, không có giải thích dài dòng và không nằm trong các block markdown (như ```geogebra).";
+      const systemInstructionText = "Bạn là chuyên gia về phần mềm Toán học GeoGebra. Hãy chuyển đổi yêu cầu vẽ hình hoặc đề bài toán học của người dùng thành các mã lệnh GeoGebra (GeoGebra Script) định dạng Tiếng Anh chuẩn (Standard English GeoGebra Commands) chính xác để minh họa cấu trúc toán học đó. Bạn BẮT BUỘC phải sử dụng toàn bộ các lệnh GeoGebra chuẩn bằng tiếng Anh (ví dụ: Point, Line, Circle, Segment, Polygon, Intersect, Midpoint, Angle, Vector, Tangent, Slider, Text, ShowAxes, ShowGrid). TUYỆT ĐỐI KHÔNG dùng các câu lệnh bằng tiếng Việt (như Điểm, ĐườngThẳng, ĐoạnThẳng, GiaoĐiểm, TrungĐiểm...) để đảm bảo mã lệnh tương thích hoàn hảo và chạy ổn định nhất trên mọi phiên bản GeoGebra. Chỉ trả về mã lệnh dưới dạng plain text, đặt mỗi câu lệnh trên một dòng mới độc lập, không có giải thích dài dòng và không nằm trong các block markdown (như ```geogebra).";
 
       if (apiKey && apiKey.trim()) {
         // Direct client-side Gemini API call using user's custom API key (helpful on GitHub Pages / static hosting)
